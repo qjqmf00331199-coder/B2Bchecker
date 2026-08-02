@@ -57,6 +57,90 @@ def add_item(
 ) -> None:
     conn.execute(
         "INSERT INTO items (item_code, item_name, default_unit_price, initial_stock) "
+
+
+# ---------- transactions ----------
+
+def add_transaction(
+    conn: sqlite3.Connection,
+    tx_date: str,
+    company_id: int,
+    item_code: str,
+    tx_type: str,
+    quantity: float,
+    unit_price: float,
+) -> int:
+    if tx_type not in TX_TYPES:
+        raise ValueError("구분은 '입고' 또는 '출고'여야 합니다.")
+    if quantity is None or quantity <= 0:
+        raise ValueError("수량은 0보다 커야 합니다.")
+    amount = quantity * unit_price
+    cur = conn.execute(
+        "INSERT INTO transactions "
+        "(tx_date, company_id, item_code, tx_type, quantity, unit_price, amount) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (tx_date, company_id, item_code, tx_type, quantity, unit_price, amount),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def _date_filter_clause(date_from: Optional[str], date_to: Optional[str]) -> Tuple[str, list]:
+    clause = ""
+    params: list = []
+    if date_from:
+        clause += " AND t.tx_date >= ?"
+        params.append(date_from)
+    if date_to:
+        clause += " AND t.tx_date <= ?"
+        params.append(date_to)
+    return clause, params
+
+
+def item_transactions(
+    conn: sqlite3.Connection,
+    item_code: str,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> List[sqlite3.Row]:
+    clause, params = _date_filter_clause(date_from, date_to)
+    query = (
+        "SELECT c.company_name, t.tx_date, t.tx_type, t.quantity, t.unit_price, t.amount "
+        "FROM transactions t JOIN companies c ON c.company_id = t.company_id "
+        "WHERE t.item_code = ?" + clause + " ORDER BY t.tx_date DESC, t.tx_id DESC"
+    )
+    return conn.execute(query, [item_code] + params).fetchall()
+
+
+def company_transactions(
+    conn: sqlite3.Connection,
+    company_id: int,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> List[sqlite3.Row]:
+    clause, params = _date_filter_clause(date_from, date_to)
+    query = (
+        "SELECT i.item_code, i.item_name, t.tx_date, t.tx_type, t.quantity, t.unit_price, t.amount "
+        "FROM transactions t JOIN items i ON i.item_code = t.item_code "
+        "WHERE t.company_id = ?" + clause + " ORDER BY t.tx_date DESC, t.tx_id DESC"
+    )
+    return conn.execute(query, [company_id] + params).fetchall()
+
+
+def current_stock(conn: sqlite3.Connection, item_code: str) -> Tuple[float, float, float]:
+    """(현재재고, 전체입고합계, 전체출고합계)를 반환한다. 기초재고를 포함한 전체 기간 기준."""
+    item = get_item(conn, item_code)
+    if item is None:
+        raise ValueError(f"존재하지 않는 품번입니다: {item_code}")
+    totals = conn.execute(
+        "SELECT "
+        "COALESCE(SUM(CASE WHEN tx_type = '입고' THEN quantity ELSE 0 END), 0) AS total_in, "
+        "COALESCE(SUM(CASE WHEN tx_type = '출고' THEN quantity ELSE 0 END), 0) AS total_out "
+        "FROM transactions WHERE item_code = ?",
+        (item_code,),
+    ).fetchone()
+    stock = item["initial_stock"] + totals["total_in"] - totals["total_out"]
+    return stock, totals["total_in"], totals["total_out"]
         "VALUES (?, ?, ?, ?)",
         (item_code, item_name, default_unit_price, initial_stock),
     )
