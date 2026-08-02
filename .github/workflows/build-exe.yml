@@ -38,3 +38,20 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/B2B_Inventory.exe
+
+      - name: Move latest tag
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f latest
+          git push origin latest --force
+
+      - name: Publish latest rolling release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "Latest (main)"
+          prerelease: true
+          files: dist/B2B_Inventory.exe
