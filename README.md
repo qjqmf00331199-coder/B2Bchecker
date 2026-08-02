@@ -11,11 +11,23 @@
 - **마스터 데이터 관리**: 거래처/품목/거래처별 단가를 추가·수정, 엑셀로 일괄 등록
 - **엑셀 연동**: 조회 화면 결과를 `.xlsx`로 내보내기, 거래/거래처/품목을 엑셀에서 가져오기
 
+## 다운로드
+
+소스 전체를 받을 필요 없이 exe 파일 하나만 받아도 실행됩니다.
+
+1. [Releases 페이지](https://github.com/qjqmf00331199-coder/B2Bchecker/releases/latest) 접속
+2. Assets에서 **B2B_Inventory.exe** 클릭해 다운로드
+3. 원하는 폴더에 놓고 실행 (첫 실행 시 같은 폴더에 `inventory.db` 자동 생성)
+
+- `main` 브랜치에 새 커밋이 올라갈 때마다 **Latest (main)** 릴리스가 최신 빌드로 자동 갱신됩니다.
+- 특정 버전을 고정해서 쓰고 싶으면 태그가 붙은 릴리스(`v1.0.0` 등)에서 받으면 됩니다.
+- 커밋별 빌드 결과물이 필요하면 [Actions 탭](https://github.com/qjqmf00331199-coder/B2Bchecker/actions) → 해당 워크플로 실행 → Artifacts에서도 받을 수 있습니다(로그인 필요, 90일 후 만료).
+
 ## 실행 방법
 
 ### 빌드된 실행 파일 사용 (Windows)
 
-`dist/B2B_Inventory.exe`를 더블클릭하면 바로 실행됩니다. DB 파일(`inventory.db`)은 exe와 같은 폴더에 자동 생성됩니다.
+다운로드한 `B2B_Inventory.exe`(또는 로컬 빌드 시 `dist/B2B_Inventory.exe`)를 더블클릭하면 바로 실행됩니다. DB 파일(`inventory.db`)은 exe와 같은 폴더에 자동 생성됩니다.
 
 ### 소스에서 직접 실행
 
