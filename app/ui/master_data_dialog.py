@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from app import models
+from app.excel_export import import_rows_from_excel
 from app.ui.autocomplete import KeyedAutocompleteEdit
 
 
@@ -60,9 +61,12 @@ class MasterDataDialog(QDialog):
         self.company_name_edit = QLineEdit()
         self.company_contact_edit = QLineEdit()
         add_button = QPushButton("추가")
+        add_button.setProperty("accent", "primary")
         update_button = QPushButton("선택 항목 수정")
+        import_button = QPushButton("엑셀로 가져오기")
         add_button.clicked.connect(self._add_company)
         update_button.clicked.connect(self._update_company)
+        import_button.clicked.connect(self._import_companies)
 
         form = QFormLayout()
         form.addRow("거래처명", self.company_name_edit)
@@ -71,6 +75,7 @@ class MasterDataDialog(QDialog):
         button_row = QHBoxLayout()
         button_row.addWidget(add_button)
         button_row.addWidget(update_button)
+        button_row.addWidget(import_button)
 
         layout = QVBoxLayout(widget)
         layout.addWidget(self.company_table)
@@ -107,6 +112,15 @@ class MasterDataDialog(QDialog):
             return
         self._reload_company_table()
         self._refresh_dependents()
+
+    def _import_companies(self) -> None:
+        rows = import_rows_from_excel(self, "거래처 엑셀 가져오기")
+        if rows is None:
+            return
+        added, skipped = models.import_companies(self.conn, rows)
+        self._reload_company_table()
+        self._refresh_dependents()
+        QMessageBox.information(self, "가져오기 완료", f"{added}건 추가, {skipped}건 중복 제외")
 
     def _update_company(self) -> None:
         row = self.company_table.currentRow()
@@ -146,11 +160,14 @@ class MasterDataDialog(QDialog):
         self.item_stock_spin.setDecimals(2)
 
         add_button = QPushButton("추가")
+        add_button.setProperty("accent", "primary")
         update_button = QPushButton("선택 항목 수정")
         new_button = QPushButton("새 품목")
+        import_button = QPushButton("엑셀로 가져오기")
         add_button.clicked.connect(self._add_item)
         update_button.clicked.connect(self._update_item)
         new_button.clicked.connect(self._clear_item_form)
+        import_button.clicked.connect(self._import_items)
 
         form = QFormLayout()
         form.addRow("품번", self.item_code_edit)
@@ -162,6 +179,7 @@ class MasterDataDialog(QDialog):
         button_row.addWidget(add_button)
         button_row.addWidget(update_button)
         button_row.addWidget(new_button)
+        button_row.addWidget(import_button)
 
         layout = QVBoxLayout(widget)
         layout.addWidget(self.item_table)
@@ -215,6 +233,15 @@ class MasterDataDialog(QDialog):
         self._clear_item_form()
         self._refresh_dependents()
 
+    def _import_items(self) -> None:
+        rows = import_rows_from_excel(self, "품목 엑셀 가져오기")
+        if rows is None:
+            return
+        added, skipped = models.import_items(self.conn, rows)
+        self._reload_item_table()
+        self._refresh_dependents()
+        QMessageBox.information(self, "가져오기 완료", f"{added}건 추가, {skipped}건 중복/오류 제외")
+
     def _update_item(self) -> None:
         row = self.item_table.currentRow()
         if row < 0:
@@ -245,6 +272,7 @@ class MasterDataDialog(QDialog):
         self.price_value_spin.setRange(-999_999_999, 999_999_999)
         self.price_value_spin.setDecimals(2)
         save_price_button = QPushButton("단가 저장")
+        save_price_button.setProperty("accent", "primary")
         save_price_button.clicked.connect(self._save_price)
 
         form = QFormLayout()

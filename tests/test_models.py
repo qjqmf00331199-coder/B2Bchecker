@@ -104,3 +104,38 @@ def test_company_transactions_joins_item_name(conn, sample):
     rows = models.company_transactions(conn, sample["company_a"])
     assert len(rows) == 1
     assert rows[0]["item_name"] == "볼트"
+
+
+def test_import_companies_adds_and_skips_duplicates(conn, sample):
+    added, skipped = models.import_companies(
+        conn, [("A상사", "dup"), ("C상사", "010-3333-4444"), (None, None)]
+    )
+    assert added == 1
+    assert skipped == 1
+    assert len(models.list_companies(conn)) == 3
+
+
+def test_import_items_adds_and_applies_defaults(conn, sample):
+    added, skipped = models.import_items(
+        conn, [("ITEM-001", "볼트", 100, 50), ("ITEM-002", "너트"), ("ITEM-003", None)]
+    )
+    assert added == 1  # ITEM-001 already exists -> skipped, ITEM-002 added, ITEM-003 missing name -> skipped
+    assert skipped == 2
+    item2 = models.get_item(conn, "ITEM-002")
+    assert item2["default_unit_price"] == 0
+    assert item2["initial_stock"] == 0
+
+
+def test_import_transactions_resolves_price_and_rejects_unknown_company(conn, sample):
+    added, failed = models.import_transactions(
+        conn,
+        [
+            ("2026-08-01", "A상사", "ITEM-001", "입고", 10),  # 단가 생략 -> 기본단가 100 사용
+            ("2026-08-02", "존재하지않는거래처", "ITEM-001", "출고", 5, 100),
+        ],
+    )
+    assert added == 1
+    assert failed == 1
+    stock, total_in, total_out = models.current_stock(conn, "ITEM-001")
+    assert total_in == 10
+    assert total_out == 0

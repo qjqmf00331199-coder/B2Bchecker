@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from app import models
+from app.excel_export import import_rows_from_excel
 from app.ui.autocomplete import KeyedAutocompleteEdit
 
 
@@ -52,6 +53,8 @@ class TransactionForm(QWidget):
         self.amount_label = QLabel("0")
 
         self.save_button = QPushButton("저장")
+        self.save_button.setProperty("accent", "primary")
+        self.import_button = QPushButton("엑셀로 가져오기")
 
         form = QFormLayout()
         form.addRow("날짜", self.date_edit)
@@ -64,6 +67,7 @@ class TransactionForm(QWidget):
 
         button_row = QHBoxLayout()
         button_row.addStretch()
+        button_row.addWidget(self.import_button)
         button_row.addWidget(self.save_button)
 
         layout = QVBoxLayout(self)
@@ -77,6 +81,7 @@ class TransactionForm(QWidget):
         self.quantity_spin.valueChanged.connect(self._recalc_amount)
         self.unit_price_spin.valueChanged.connect(self._recalc_amount)
         self.save_button.clicked.connect(self._on_save)
+        self.import_button.clicked.connect(self._on_import)
 
     def reload_master_data(self) -> None:
         companies = models.list_companies(self.conn)
@@ -124,6 +129,15 @@ class TransactionForm(QWidget):
 
         self._reset_form()
         self.transaction_saved.emit()
+
+    def _on_import(self) -> None:
+        rows = import_rows_from_excel(self, "거래내역 엑셀 가져오기")
+        if rows is None:
+            return
+        added, failed = models.import_transactions(self.conn, rows)
+        QMessageBox.information(self, "가져오기 완료", f"{added}건 추가, {failed}건 실패")
+        if added:
+            self.transaction_saved.emit()
 
     def _reset_form(self) -> None:
         self.date_edit.setDate(QDate.currentDate())

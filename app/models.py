@@ -1,5 +1,6 @@
 """companies / items / price_list / transactions 데이터 접근 계층."""
 import sqlite3
+from datetime import date, datetime
 from typing import List, Optional, Tuple
 
 TX_TYPES = ("입고", "출고")
@@ -34,6 +35,22 @@ def update_company(conn: sqlite3.Connection, company_id: int, company_name: str,
         (company_name, contact, company_id),
     )
     conn.commit()
+
+
+def import_companies(conn: sqlite3.Connection, rows) -> Tuple[int, int]:
+    """rows: [(거래처명, 담당자/연락처?), ...]. (추가건수, 제외건수) 반환."""
+    added, skipped = 0, 0
+    for row in rows:
+        if not row or not row[0]:
+            continue
+        name = str(row[0]).strip()
+        contact = str(row[1]).strip() if len(row) > 1 and row[1] else None
+        try:
+            add_company(conn, name, contact)
+            added += 1
+        except sqlite3.IntegrityError:
+            skipped += 1
+    return added, skipped
 
 
 # ---------- items ----------
@@ -76,6 +93,25 @@ def update_item(
         (item_name, default_unit_price, initial_stock, item_code),
     )
     conn.commit()
+
+
+def import_items(conn: sqlite3.Connection, rows) -> Tuple[int, int]:
+    """rows: [(품번, 품명, 기본단가?, 기초재고?), ...]. (추가건수, 제외건수) 반환."""
+    added, skipped = 0, 0
+    for row in rows:
+        if not row or not row[0] or len(row) < 2 or not row[1]:
+            skipped += 1
+            continue
+        code = str(row[0]).strip()
+        name = str(row[1]).strip()
+        price = float(row[2]) if len(row) > 2 and row[2] not in (None, "") else 0
+        stock = float(row[3]) if len(row) > 3 and row[3] not in (None, "") else 0
+        try:
+            add_item(conn, code, name, price, stock)
+            added += 1
+        except sqlite3.IntegrityError:
+            skipped += 1
+    return added, skipped
 
 
 # ---------- price_list ----------
@@ -141,6 +177,37 @@ def add_transaction(
     )
     conn.commit()
     return cur.lastrowid
+
+
+def import_transactions(conn: sqlite3.Connection, rows) -> Tuple[int, int]:
+    """rows: [(날짜, 거래처명, 품번, 구분, 수량, 단가?), ...]. (추가건수, 실패건수) 반환."""
+    companies = {c["company_name"]: c["company_id"] for c in list_companies(conn)}
+    added, failed = 0, 0
+    for row in rows:
+        if not row or not row[0]:
+            continue
+        try:
+            raw_date = row[0]
+            tx_date = (
+                raw_date.strftime("%Y-%m-%d")
+                if isinstance(raw_date, (datetime, date))
+                else str(raw_date).strip()
+            )
+            company_id = companies.get(str(row[1]).strip())
+            if company_id is None:
+                raise ValueError(f"존재하지 않는 거래처: {row[1]}")
+            item_code = str(row[2]).strip()
+            tx_type = str(row[3]).strip()
+            quantity = float(row[4])
+            unit_price = (
+                float(row[5]) if len(row) > 5 and row[5] not in (None, "")
+                else resolve_unit_price(conn, company_id, item_code)
+            )
+            add_transaction(conn, tx_date, company_id, item_code, tx_type, quantity, unit_price)
+            added += 1
+        except (ValueError, TypeError, IndexError, sqlite3.IntegrityError):
+            failed += 1
+    return added, failed
 
 
 def _date_filter_clause(date_from: Optional[str], date_to: Optional[str]) -> Tuple[str, list]:
