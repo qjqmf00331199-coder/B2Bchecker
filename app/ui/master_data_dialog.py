@@ -147,8 +147,10 @@ class MasterDataDialog(QDialog):
 
         add_button = QPushButton("추가")
         update_button = QPushButton("선택 항목 수정")
+        new_button = QPushButton("새 품목")
         add_button.clicked.connect(self._add_item)
         update_button.clicked.connect(self._update_item)
+        new_button.clicked.connect(self._clear_item_form)
 
         form = QFormLayout()
         form.addRow("품번", self.item_code_edit)
@@ -159,6 +161,7 @@ class MasterDataDialog(QDialog):
         button_row = QHBoxLayout()
         button_row.addWidget(add_button)
         button_row.addWidget(update_button)
+        button_row.addWidget(new_button)
 
         layout = QVBoxLayout(widget)
         layout.addWidget(self.item_table)
@@ -187,6 +190,14 @@ class MasterDataDialog(QDialog):
         self.item_price_spin.setValue(float(self.item_table.item(row, 2).text().replace(",", "")))
         self.item_stock_spin.setValue(float(self.item_table.item(row, 3).text().replace(",", "")))
 
+    def _clear_item_form(self) -> None:
+        self.item_table.clearSelection()
+        self.item_code_edit.setEnabled(True)
+        self.item_code_edit.clear()
+        self.item_name_edit.clear()
+        self.item_price_spin.setValue(0)
+        self.item_stock_spin.setValue(0)
+
     def _add_item(self) -> None:
         code = self.item_code_edit.text().strip()
         name = self.item_name_edit.text().strip()
@@ -201,7 +212,7 @@ class MasterDataDialog(QDialog):
             QMessageBox.warning(self, "입력 오류", "이미 존재하는 품번입니다.")
             return
         self._reload_item_table()
-        self.item_code_edit.setEnabled(True)
+        self._clear_item_form()
         self._refresh_dependents()
 
     def _update_item(self) -> None:
