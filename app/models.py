@@ -163,51 +163,96 @@ def add_transaction(
     tx_type: str,
     quantity: float,
     unit_price: float,
+    tx_category: str = "",
 ) -> int:
     if tx_type not in TX_TYPES:
         raise ValueError("구분은 '입고' 또는 '출고'여야 합니다.")
-    if quantity is None or quantity <= 0:
-        raise ValueError("수량은 0보다 커야 합니다.")
+    if quantity is None or quantity < 0:
+        raise ValueError("수량은 0 이상이어야 합니다.")
     amount = quantity * unit_price
     cur = conn.execute(
         "INSERT INTO transactions "
-        "(tx_date, company_id, item_code, tx_type, quantity, unit_price, amount) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (tx_date, company_id, item_code, tx_type, quantity, unit_price, amount),
+        "(tx_date, company_id, item_code, tx_type, quantity, unit_price, amount, tx_category) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (tx_date, company_id, item_code, tx_type, quantity, unit_price, amount, tx_category),
     )
     conn.commit()
     return cur.lastrowid
 
 
-def import_transactions(conn: sqlite3.Connection, rows) -> Tuple[int, int]:
-    """rows: [(날짜, 거래처명, 품번, 구분, 수량, 단가?), ...]. (추가건수, 실패건수) 반환."""
+_BLANK = "미기재"
+
+
+def _or_blank(value) -> str:
+    text = str(value).strip() if value not in (None, "") else ""
+    return text or _BLANK
+
+
+def _existing_tx_signatures(conn: sqlite3.Connection) -> set:
+    return {
+        (r["tx_date"], r["company_id"], r["item_code"], r["tx_type"], r["quantity"], r["tx_category"])
+        for r in conn.execute(
+            "SELECT tx_date, company_id, item_code, tx_type, quantity, tx_category FROM transactions"
+        )
+    }
+
+
+def import_transactions(conn: sqlite3.Connection, rows) -> Tuple[int, int, int]:
+    """rows: [(분류, 거래처명, 날짜, 구분, 품번, 수량), ...]. 거래처/품목이 마스터에 없으면 자동 등록.
+    분류/거래처명/날짜/품번이 공란이면 '미기재'로 채우고, 수량이 공란이면 0으로 채운다.
+    구분(입고/출고)은 필수값이라 공란이면 해당 행이 실패로 처리된다.
+    날짜/거래처/품번/구분/수량/분류가 모두 같은 행은 중복으로 보고 건너뛴다.
+    (추가건수, 중복건수, 실패건수) 반환."""
     companies = {c["company_name"]: c["company_id"] for c in list_companies(conn)}
-    added, failed = 0, 0
+    item_codes = {i["item_code"] for i in list_items(conn)}
+    seen = _existing_tx_signatures(conn)
+    added, duplicated, failed = 0, 0, 0
     for row in rows:
-        if not row or not row[0]:
+        if not row or all(v in (None, "") for v in row):
             continue
         try:
-            raw_date = row[0]
+            tx_category = _or_blank(row[0])
+            company_name = _or_blank(row[1])
+            company_id = companies.get(company_name)
+            if company_id is None:
+                company_id = add_company(conn, company_name)
+                companies[company_name] = company_id
+            raw_date = row[2]
             tx_date = (
                 raw_date.strftime("%Y-%m-%d")
                 if isinstance(raw_date, (datetime, date))
-                else str(raw_date).strip()
+                else _or_blank(raw_date)
             )
-            company_id = companies.get(str(row[1]).strip())
-            if company_id is None:
-                raise ValueError(f"존재하지 않는 거래처: {row[1]}")
-            item_code = str(row[2]).strip()
             tx_type = str(row[3]).strip()
-            quantity = float(row[4])
-            unit_price = (
-                float(row[5]) if len(row) > 5 and row[5] not in (None, "")
-                else resolve_unit_price(conn, company_id, item_code)
+            item_code = _or_blank(row[4])
+            if item_code not in item_codes:
+                add_item(conn, item_code, item_code)
+                item_codes.add(item_code)
+            quantity = float(row[5]) if row[5] not in (None, "") else 0.0
+
+            signature = (tx_date, company_id, item_code, tx_type, quantity, tx_category)
+            if signature in seen:
+                duplicated += 1
+                continue
+
+            unit_price = resolve_unit_price(conn, company_id, item_code)
+            add_transaction(
+                conn, tx_date, company_id, item_code, tx_type, quantity, unit_price, tx_category
             )
-            add_transaction(conn, tx_date, company_id, item_code, tx_type, quantity, unit_price)
+            seen.add(signature)
             added += 1
         except (ValueError, TypeError, IndexError, sqlite3.IntegrityError):
             failed += 1
-    return added, failed
+    return added, duplicated, failed
+
+
+def list_transactions(conn: sqlite3.Connection) -> List[sqlite3.Row]:
+    """엑셀 내보내기용 전체 거래내역 (분류, 거래처명, 날짜, 구분, 품번, 수량 순)."""
+    return conn.execute(
+        "SELECT t.tx_category, c.company_name, t.tx_date, t.tx_type, t.item_code, t.quantity "
+        "FROM transactions t JOIN companies c ON c.company_id = t.company_id "
+        "ORDER BY t.tx_date DESC, t.tx_id DESC"
+    ).fetchall()
 
 
 def _date_filter_clause(date_from: Optional[str], date_to: Optional[str]) -> Tuple[str, list]:

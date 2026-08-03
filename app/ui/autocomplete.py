@@ -20,9 +20,13 @@ class KeyedAutocompleteEdit(QLineEdit):
         self.setCompleter(self._completer)
 
     def set_options(self, pairs: List[Tuple[object, str]]) -> None:
-        """pairs: [(key, label), ...]"""
+        """pairs: [(key, label), ...]. 라벨이 "품번 - 품명"처럼 key를 포함하는 경우,
+        key 자체만 입력해도 매칭되도록 별칭으로도 등록한다."""
         current_key = self.current_key()
         self._label_to_key = {label: key for key, label in pairs}
+        for key, _label in pairs:
+            if isinstance(key, str) and key not in self._label_to_key:
+                self._label_to_key[key] = key
         model = QStringListModel([label for _, label in pairs], self)
         self._completer.setModel(model)
         if current_key is not None:

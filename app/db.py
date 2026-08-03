@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     tx_type TEXT NOT NULL CHECK (tx_type IN ('입고', '출고')),
     quantity REAL NOT NULL,
     unit_price REAL NOT NULL,
-    amount REAL NOT NULL
+    amount REAL NOT NULL,
+    tx_category TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_tx_item ON transactions(item_code);
@@ -59,5 +60,8 @@ def connect(db_path: Optional[str] = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(transactions)")}
+    if "tx_category" not in columns:
+        conn.execute("ALTER TABLE transactions ADD COLUMN tx_category TEXT NOT NULL DEFAULT ''")
     conn.commit()
     return conn

@@ -64,9 +64,8 @@ def test_add_transaction_allows_negative_unit_price(conn, sample):
     assert row["amount"] == -100
 
 
-def test_add_transaction_rejects_non_positive_quantity(conn, sample):
-    with pytest.raises(ValueError):
-        models.add_transaction(conn, "2026-08-01", sample["company_a"], "ITEM-001", "입고", 0, 100)
+def test_add_transaction_rejects_negative_quantity(conn, sample):
+    models.add_transaction(conn, "2026-08-01", sample["company_a"], "ITEM-001", "입고", 0, 100)
     with pytest.raises(ValueError):
         models.add_transaction(conn, "2026-08-01", sample["company_a"], "ITEM-001", "입고", -5, 100)
 
@@ -126,16 +125,42 @@ def test_import_items_adds_and_applies_defaults(conn, sample):
     assert item2["initial_stock"] == 0
 
 
-def test_import_transactions_resolves_price_and_rejects_unknown_company(conn, sample):
-    added, failed = models.import_transactions(
+def test_import_transactions_resolves_price_and_autoregisters_master_data(conn, sample):
+    added, duplicated, failed = models.import_transactions(
         conn,
         [
-            ("2026-08-01", "A상사", "ITEM-001", "입고", 10),  # 단가 생략 -> 기본단가 100 사용
-            ("2026-08-02", "존재하지않는거래처", "ITEM-001", "출고", 5, 100),
+            ("재료비", "A상사", "2026-08-01", "입고", "ITEM-001", 10),  # 단가는 자동 계산
+            ("가공비", "신규거래처", "2026-08-02", "입고", "NEW-ITEM", 3),  # 거래처/품목 자동 등록
+            ("재료비", "A상사", "2026-08-03", "출고", "ITEM-001", None),  # 수량 누락 -> 0으로 처리
+            ("재료비", "A상사", "2026-08-04", "", "ITEM-001", 5),  # 구분 누락 -> 실패
         ],
     )
-    assert added == 1
+    assert added == 3
+    assert duplicated == 0
     assert failed == 1
+    assert "신규거래처" in {c["company_name"] for c in models.list_companies(conn)}
+    assert models.get_item(conn, "NEW-ITEM") is not None
     stock, total_in, total_out = models.current_stock(conn, "ITEM-001")
     assert total_in == 10
     assert total_out == 0
+
+
+def test_import_transactions_blank_fields_become_placeholder(conn, sample):
+    added, duplicated, failed = models.import_transactions(
+        conn, [("", "", "", "입고", "", 7)]
+    )
+    assert added == 1
+    assert duplicated == 0
+    assert failed == 0
+    assert "미기재" in {c["company_name"] for c in models.list_companies(conn)}
+    assert models.get_item(conn, "미기재") is not None
+
+
+def test_import_transactions_skips_exact_duplicates(conn, sample):
+    row = ("재료비", "A상사", "2026-08-01", "입고", "ITEM-001", 10)
+    added1, duplicated1, failed1 = models.import_transactions(conn, [row])
+    added2, duplicated2, failed2 = models.import_transactions(conn, [row])
+    assert (added1, duplicated1, failed1) == (1, 0, 0)
+    assert (added2, duplicated2, failed2) == (0, 1, 0)
+    stock, total_in, total_out = models.current_stock(conn, "ITEM-001")
+    assert total_in == 10

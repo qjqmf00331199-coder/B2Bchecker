@@ -9,15 +9,20 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from app import models
-from app.excel_export import import_rows_from_excel
+from app.excel_export import export_table_to_excel, import_rows_from_excel
 from app.ui.autocomplete import KeyedAutocompleteEdit
+
+COLUMNS = ["분류", "거래처명", "날짜", "구분", "품번", "수량"]
 
 
 class TransactionForm(QWidget):
@@ -35,6 +40,9 @@ class TransactionForm(QWidget):
         self.date_edit = QDateEdit(QDate.currentDate())
         self.date_edit.setCalendarPopup(True)
         self.date_edit.setDisplayFormat("yyyy-MM-dd")
+
+        self.category_edit = QLineEdit()
+        self.category_edit.setPlaceholderText("예: 가공비, 재료비 (선택)")
 
         self.company_edit = KeyedAutocompleteEdit(placeholder="거래처명 입력...")
         self.item_edit = KeyedAutocompleteEdit(placeholder="품번 또는 품명 입력...")
@@ -55,8 +63,10 @@ class TransactionForm(QWidget):
         self.save_button = QPushButton("저장")
         self.save_button.setProperty("accent", "primary")
         self.import_button = QPushButton("엑셀로 가져오기")
+        self.export_button = QPushButton("엑셀로 내보내기")
 
         form = QFormLayout()
+        form.addRow("분류", self.category_edit)
         form.addRow("날짜", self.date_edit)
         form.addRow("거래처", self.company_edit)
         form.addRow("품번", self.item_edit)
@@ -67,12 +77,18 @@ class TransactionForm(QWidget):
 
         button_row = QHBoxLayout()
         button_row.addStretch()
+        button_row.addWidget(self.export_button)
         button_row.addWidget(self.import_button)
         button_row.addWidget(self.save_button)
+
+        self.table = QTableWidget(0, len(COLUMNS))
+        self.table.setHorizontalHeaderLabels(COLUMNS)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addLayout(button_row)
+        layout.addWidget(self.table)
 
         self.company_edit.completer_widget().activated.connect(self._on_company_or_item_selected)
         self.company_edit.editingFinished.connect(self._on_company_or_item_selected)
@@ -82,6 +98,9 @@ class TransactionForm(QWidget):
         self.unit_price_spin.valueChanged.connect(self._recalc_amount)
         self.save_button.clicked.connect(self._on_save)
         self.import_button.clicked.connect(self._on_import)
+        self.export_button.clicked.connect(
+            lambda: export_table_to_excel(self.table, self, "거래내역.xlsx")
+        )
 
     def reload_master_data(self) -> None:
         companies = models.list_companies(self.conn)
@@ -90,6 +109,22 @@ class TransactionForm(QWidget):
         self.item_edit.set_options(
             [(i["item_code"], f'{i["item_code"]} - {i["item_name"]}') for i in items]
         )
+        self.refresh_table()
+
+    def refresh_table(self) -> None:
+        rows = models.list_transactions(self.conn)
+        self.table.setRowCount(len(rows))
+        for r, row in enumerate(rows):
+            values = [
+                row["tx_category"],
+                row["company_name"],
+                row["tx_date"],
+                row["tx_type"],
+                row["item_code"],
+                f'{row["quantity"]:,.2f}',
+            ]
+            for c, value in enumerate(values):
+                self.table.setItem(r, c, QTableWidgetItem(value))
 
     def _on_company_or_item_selected(self) -> None:
         company_id = self.company_edit.current_key()
@@ -122,24 +157,30 @@ class TransactionForm(QWidget):
                 self.type_combo.currentText(),
                 self.quantity_spin.value(),
                 self.unit_price_spin.value(),
+                self.category_edit.text().strip(),
             )
         except ValueError as exc:
             QMessageBox.warning(self, "입력 오류", str(exc))
             return
 
         self._reset_form()
+        self.refresh_table()
         self.transaction_saved.emit()
 
     def _on_import(self) -> None:
         rows = import_rows_from_excel(self, "거래내역 엑셀 가져오기")
         if rows is None:
             return
-        added, failed = models.import_transactions(self.conn, rows)
-        QMessageBox.information(self, "가져오기 완료", f"{added}건 추가, {failed}건 실패")
+        added, duplicated, failed = models.import_transactions(self.conn, rows)
+        QMessageBox.information(
+            self, "가져오기 완료", f"{added}건 추가, {duplicated}건 중복 제외, {failed}건 실패"
+        )
         if added:
+            self.reload_master_data()
             self.transaction_saved.emit()
 
     def _reset_form(self) -> None:
+        self.category_edit.clear()
         self.date_edit.setDate(QDate.currentDate())
         self.company_edit.clear()
         self.item_edit.clear()
